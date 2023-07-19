@@ -3,10 +3,12 @@
 use std::collections::BTreeMap;
 use std::ops::{Range, RangeBounds, Bound};
 
+#[derive(Debug)]
 pub struct RangeTree<V: Value> {
     inner: BTreeMap<V::K, Slot<V>>,
 }
 
+#[derive(Debug)]
 struct Slot<V: Value> {
     len: V::K,
     value: V,
@@ -25,16 +27,16 @@ impl<K: Key + 'static, V: Value<K = K> + 'static> RangeTree<V> {
                 // already included in the next range
                 Bound::Unbounded => false,
                 Bound::Included(i) => **k + v.len > i,
-                Bound::Excluded(e) => **k + v.len > e + K::from(1_u8),
+                Bound::Excluded(e) => **k + v.len >= e,
             })
             .map_or(start_bound, |(k, _)| Bound::Included(*k))
     }
     pub fn conflicts(&self, range: impl RangeBounds<K>) -> impl Iterator<Item = (Range<K>, &V)> + '_ {
         let real_start_bound = self.real_start_bound(range.start_bound().cloned());
-        let is_empty = real_start_bound != range.end_bound().cloned();
+        let is_empty = real_start_bound == range.end_bound().cloned();
+        //dbg!(range.start_bound(), range.end_bound(), is_empty, real_start_bound);
 
-
-        Some(self.inner.range((real_start_bound, range.end_bound().cloned())).map(|(k, v)| (*k..*k + v.len, &v.value))).filter(|_| !is_empty).into_iter().flatten()
+        (!is_empty).then(|| self.inner.range((real_start_bound, range.end_bound().cloned())).map(|(k, v)| (*k..*k + v.len, &v.value))).into_iter().flatten()
     }
     pub fn conflicts_mut(&mut self, range: impl RangeBounds<K>) -> impl Iterator<Item = (Range<K>, &mut V)> + '_ {
         let real_start_bound = self.real_start_bound(range.start_bound().cloned());
@@ -82,6 +84,7 @@ impl<K: Key + 'static, V: Value<K = K> + 'static> RangeTree<V> {
 
         let mut start = range.start_bound().cloned();
         let end = range.end_bound().cloned();
+        //dbg!(self.conflicts((start, end)).collect::<Vec<_>>());
 
         while let Some((part_range_ref, _)) = { let x = self.conflicts((start, end)).next(); x } {
             let k = part_range_ref.start;
@@ -106,6 +109,7 @@ impl<K: Key + 'static, V: Value<K = K> + 'static> RangeTree<V> {
 
             start = part_range.end_bound().cloned();
         }
+        //dbg!(&ret);
 
         ret
     }
@@ -157,7 +161,11 @@ impl<K: Key + 'static, V: Value<K = K> + 'static> RangeTree<V> {
     }
 }
 
-fn extract<K: Ord + Copy>(outer: Range<K>, inner: Range<K>) -> (Option<Range<K>>, Range<K>, Option<Range<K>>) {
+fn extract<K: Ord + Copy + std::fmt::Debug>(outer: Range<K>, inner: Range<K>) -> (Option<Range<K>>, Range<K>, Option<Range<K>>) {
+    //dbg!(&outer, &inner);
+    let smallest_start = core::cmp::min(outer.start, inner.start);
+    let greatest_end = core::cmp::max(outer.end, inner.end);
+
     let middle_start = core::cmp::max(inner.start, outer.start);
     let middle_end = core::cmp::min(inner.end, outer.end);
 
@@ -165,20 +173,20 @@ fn extract<K: Ord + Copy>(outer: Range<K>, inner: Range<K>) -> (Option<Range<K>>
     let middle_end = core::cmp::max(middle_start, middle_end);
 
     (
-        Some(outer.start..middle_start).filter(|r| !r.is_empty()),
+        Some(smallest_start..middle_start).filter(|r| !r.is_empty()),
         middle_start..middle_end,
-        Some(middle_end..outer.end).filter(|r| !r.is_empty()),
+        Some(middle_end..greatest_end).filter(|r| !r.is_empty()),
     )
 }
 
 #[derive(Debug)]
 pub struct Occupied;
 
-pub trait Key: std::ops::Add<Output = Self> + std::ops::Sub<Output = Self> + std::ops::AddAssign + Copy + Ord + From<u8> {}
+pub trait Key: std::ops::Add<Output = Self> + std::ops::Sub<Output = Self> + std::ops::AddAssign + Copy + Ord + From<u8> + std::fmt::Debug {}
 impl Key for u64 {}
 impl Key for usize {}
 
-pub trait Value: Sized {
+pub trait Value: Sized + std::fmt::Debug {
     type K: Key;
 
     fn try_merge_backwards(self, other: &Self) -> Result<Self, Self>;
