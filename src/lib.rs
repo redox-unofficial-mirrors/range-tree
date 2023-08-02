@@ -63,13 +63,14 @@ impl<K: Key + 'static, V: Value<K = K> + 'static> RangeTree<V> {
                 Err(v) => value = v,
             }
         }
-        if let Some(next) = self.inner.get(&(start + len)) {
+        let end = start + len;
+        if let Some(next) = self.inner.get(&end) {
             match value.try_merge_forward(&next.value) {
                 Ok(v) => {
                     len += next.len;
                     value = v;
 
-                    let _ = self.inner.remove(&(start + len)).unwrap();
+                    let _ = self.inner.remove(&end).unwrap();
                 }
                 Err(v) => value = v,
             }
