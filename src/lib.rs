@@ -1,5 +1,3 @@
-#![feature(let_chains)]
-
 use std::collections::BTreeMap;
 use std::ops::{Range, RangeBounds, Bound};
 
@@ -51,16 +49,18 @@ impl<K: Key + 'static, V: Value<K = K> + 'static> RangeTree<V> {
             return Err(Occupied);
         }
 
-        if let Some((prev_base, prev)) = self.inner.range(..start).next_back() && *prev_base + prev.len == start {
-            match value.try_merge_backwards(&prev.value) {
-                Ok(v) => {
-                    len += prev.len;
-                    start = *prev_base;
-                    value = v;
+        if let Some((prev_base, prev)) = self.inner.range(..start).next_back() {
+            if *prev_base + prev.len == start {
+                match value.try_merge_backwards(&prev.value) {
+                    Ok(v) => {
+                        len += prev.len;
+                        start = *prev_base;
+                        value = v;
 
-                    let _ = self.inner.remove(&start).unwrap();
+                        let _ = self.inner.remove(&start).unwrap();
+                    }
+                    Err(v) => value = v,
                 }
-                Err(v) => value = v,
             }
         }
         let end = start + len;
