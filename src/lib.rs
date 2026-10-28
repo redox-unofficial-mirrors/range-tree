@@ -98,15 +98,19 @@ impl<K: Key + 'static, V: Value<K = K> + 'static> RangeTree<V> {
     pub fn remove(&mut self, range: Range<K>) -> Vec<(Range<K>, V)> {
         let mut ret = Vec::new();
 
-        let mut start = range.start_bound().cloned();
-        let end = range.end_bound().cloned();
-        //dbg!(self.conflicts((start, end)).collect::<Vec<_>>());
+        //dbg!(self.conflicts(range.clone()).collect::<Vec<_>>());
+        loop {
+            let first_conflict_key = {
+                self.conflicts(range.clone())
+                    .next()
+                    .map(|(part_range_ref, _)| part_range_ref.start)
+            };
 
-        while let Some((part_range_ref, _)) = {
-            let x = self.conflicts((start, end)).next();
-            x
-        } {
-            let k = part_range_ref.start;
+            let k = match first_conflict_key {
+                Some(k) => k,
+                None => break,
+            };
+
             let Slot { len, value } = self.inner.remove(&k).unwrap();
             let part_range = k..k + len;
 
@@ -126,8 +130,6 @@ impl<K: Key + 'static, V: Value<K = K> + 'static> RangeTree<V> {
             }
 
             ret.push((range_to_remove, value));
-
-            start = std::ops::Bound::Included(part_range.end);
         }
         //dbg!(&ret);
 
