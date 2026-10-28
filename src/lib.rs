@@ -138,30 +138,20 @@ impl<K: Key + 'static, V: Value<K = K> + 'static> RangeTree<V> {
     pub fn remove_and_unused(&mut self, range: Range<K>) -> Vec<(Range<K>, Option<V>)> {
         let removed = self.remove(range.clone());
         let mut ret = Vec::new();
-        let mut iter = removed.into_iter().peekable();
 
-        let Some((first_range, first_v)) = iter.next() else {
-            return vec![(range, None)];
-        };
+        let mut offset = range.start;
 
-        let mut prev_end = first_range.start;
+        for (r, v) in removed {
+            if r.start > offset {
+                ret.push((offset..r.start, None));
+            }
 
-        if first_range.start != range.start {
-            ret.push((K::from(0)..first_range.start, None));
+            offset = r.end;
+            ret.push((r, Some(v)));
         }
-        ret.push((first_range.clone(), Some(first_v)));
 
-        while let Some((entry_range, v)) = iter.next() {
-            if prev_end != entry_range.start {
-                ret.push((prev_end..entry_range.start, None));
-            }
-
-            prev_end = entry_range.end;
-            ret.push((entry_range, Some(v)));
-
-            if iter.peek().is_none() {
-                ret.push((prev_end..range.end, None));
-            }
+        if offset < range.end {
+            ret.push((offset..range.end, None));
         }
 
         ret
