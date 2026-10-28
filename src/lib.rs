@@ -118,15 +118,11 @@ impl<K: Key + 'static, V: Value<K = K> + 'static> RangeTree<V> {
                 range_after.clone(),
             );
 
-            if let (Some(range_before), Some(v_before)) = (range_before, v_before) {
-                let k = range_before.start;
-                let len = range_before.end - range_before.start;
-                let _ = self.insert(k, len, v_before);
+            if let (Some(rb), Some(vb)) = (range_before, v_before) {
+                let _ = self.insert(rb.start, rb.end - rb.start, vb);
             }
-            if let (Some(range_after), Some(v_after)) = (range_after, v_after) {
-                let k = range_after.start;
-                let len = range_after.end - range_after.start;
-                let _ = self.insert(k, len, v_after);
+            if let (Some(ra), Some(va)) = (range_after, v_after) {
+                let _ = self.insert(ra.start, ra.end - ra.start, va);
             }
 
             ret.push((range_to_remove, value));
@@ -196,20 +192,21 @@ fn extract<K: Ord + Copy + std::fmt::Debug>(
     inner: Range<K>,
 ) -> (Option<Range<K>>, Range<K>, Option<Range<K>>) {
     //dbg!(&outer, &inner);
-    let smallest_start = core::cmp::min(outer.start, inner.start);
-    let greatest_end = core::cmp::max(outer.end, inner.end);
+    let before = if inner.start < outer.start {
+        Some(inner.start..outer.start)
+    } else {
+        None
+    };
 
-    let middle_start = core::cmp::max(inner.start, outer.start);
-    let middle_end = core::cmp::min(inner.end, outer.end);
+    let middle = core::cmp::max(inner.start, outer.start)..core::cmp::min(inner.end, outer.end);
 
-    let middle_start = core::cmp::min(middle_start, middle_end);
-    let middle_end = core::cmp::max(middle_start, middle_end);
+    let after = if inner.end > outer.end {
+        Some(outer.end..inner.end)
+    } else {
+        None
+    };
 
-    (
-        Some(smallest_start..middle_start).filter(|r| !r.is_empty()),
-        middle_start..middle_end,
-        Some(middle_end..greatest_end).filter(|r| !r.is_empty()),
-    )
+    (before, middle, after)
 }
 
 #[derive(Debug)]
