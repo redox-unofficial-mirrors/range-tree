@@ -241,3 +241,134 @@ pub trait Value: Sized + std::fmt::Debug {
         next_range: Option<Range<Self::K>>,
     ) -> (Option<Self>, Self, Option<Self>);
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::ops::Range;
+
+    #[derive(Debug, Clone, PartialEq)]
+    struct TestFmap {
+        rc: usize,
+    }
+
+    impl Value for TestFmap {
+        type K = u64;
+
+        fn try_merge_forward(self, other: &Self) -> Result<Self, Self> {
+            if self.rc == other.rc {
+                Ok(self)
+            } else {
+                Err(self)
+            }
+        }
+
+        fn try_merge_backwards(self, other: &Self) -> Result<Self, Self> {
+            if self.rc == other.rc {
+                Ok(self)
+            } else {
+                Err(self)
+            }
+        }
+
+        fn split(
+            self,
+            prev_range: Option<Range<Self::K>>,
+            _range: Range<Self::K>,
+            next_range: Option<Range<Self::K>>,
+        ) -> (Option<Self>, Self, Option<Self>) {
+            (
+                prev_range.map(|_| self.clone()),
+                self.clone(),
+                next_range.map(|_| self.clone()),
+            )
+        }
+    }
+
+    #[test]
+    fn test_unmap_middle() {
+        let mut tree = RangeTree::new();
+
+        // Map 0..3000
+        tree.insert(0, 3000, TestFmap { rc: 1 }).unwrap();
+
+        // Unmap 1000..2000
+        let removed = tree.remove(1000..2000);
+        assert_eq!(removed.len(), 1);
+        assert_eq!(removed[0].0, 1000..2000);
+
+        // Must be 0..1000 and 2000..3000
+        let ranges: Vec<_> = tree.iter().map(|(r, v)| (r, v.rc)).collect();
+        assert_eq!(ranges, vec![(0..1000, 1), (2000..3000, 1)]);
+    }
+
+    #[test]
+    fn test_refcount_split_and_merge() {
+        // Map 0..3000
+        let mut tree = RangeTree::new();
+        tree.insert(0, 3000, TestFmap { rc: 1 }).unwrap();
+
+        // Split 1000..2000
+        let removed = tree.remove(1000..2000);
+        for (range, mut val) in removed {
+            val.rc += 1;
+            tree.insert(range.start, range.end - range.start, val)
+                .unwrap();
+        }
+
+        let ranges: Vec<_> = tree.iter().map(|(r, v)| (r, v.rc)).collect();
+        assert_eq!(ranges, vec![(0..1000, 1), (1000..2000, 2), (2000..3000, 1)]);
+
+        // Merge 1000..2000
+        let removed = tree.remove(1000..2000);
+        for (range, mut val) in removed {
+            val.rc -= 1;
+            tree.insert(range.start, range.end - range.start, val)
+                .unwrap();
+        }
+
+        let ranges: Vec<_> = tree.iter().map(|(r, v)| (r, v.rc)).collect();
+        assert_eq!(ranges, vec![(0..3000, 1)]);
+    }
+
+    #[test]
+    fn test_remove_and_unused_with_holes() {
+        // Map 1000..3000
+        let mut tree = RangeTree::new();
+        tree.insert(1000, 2000, TestFmap { rc: 1 }).unwrap();
+
+        // Unmap 0..4000
+        let affected = tree.remove_and_unused(0..4000);
+
+        assert_eq!(affected.len(), 3);
+
+        assert_eq!(affected[0].0, 0..1000);
+        assert!(affected[0].1.is_none());
+
+        assert_eq!(affected[1].0, 1000..3000);
+        assert_eq!(affected[1].1.as_ref().unwrap().rc, 1);
+
+        assert_eq!(affected[2].0, 3000..4000);
+        assert!(affected[2].1.is_none());
+    }
+
+    #[test]
+    fn test_overlapping_removals() {
+        // Map 0..2000, 2000, 4000
+        let mut tree = RangeTree::new();
+        tree.insert(0, 2000, TestFmap { rc: 1 }).unwrap();
+        tree.insert(2000, 2000, TestFmap { rc: 2 }).unwrap();
+
+        // Unmap 1000..3000
+        let removed = tree.remove(1000..3000);
+
+        assert_eq!(removed.len(), 2);
+        assert_eq!(removed[0].0, 1000..2000);
+        assert_eq!(removed[0].1.rc, 1);
+        assert_eq!(removed[1].0, 2000..3000);
+        assert_eq!(removed[1].1.rc, 2);
+
+        let ranges: Vec<_> = tree.iter().map(|(r, v)| (r, v.rc)).collect();
+        assert_eq!(ranges, vec![(0..1000, 1), (3000..4000, 2)]);
+    }
+}
