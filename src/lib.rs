@@ -1,6 +1,7 @@
 use std::collections::BTreeMap;
 use std::ops::{Bound, Range, RangeBounds};
 
+/// A structure that hold map of [`Value`] in form of ranges by [`Value::K`]
 #[derive(Debug)]
 pub struct RangeTree<V: Value> {
     inner: BTreeMap<V::K, Slot<V>>,
@@ -13,6 +14,7 @@ struct Slot<V: Value> {
 }
 
 impl<K: Key + 'static, V: Value<K = K> + 'static> RangeTree<V> {
+    /// Get a new [`RangeTree`]
     pub const fn new() -> Self {
         Self {
             inner: BTreeMap::new(),
@@ -30,6 +32,7 @@ impl<K: Key + 'static, V: Value<K = K> + 'static> RangeTree<V> {
             })
             .map_or(start_bound, |(k, _)| Bound::Included(*k))
     }
+    /// Get an iterator that return reference of entries over specified range, including partial ranges.
     pub fn conflicts(
         &self,
         range: impl RangeBounds<K>,
@@ -47,6 +50,7 @@ impl<K: Key + 'static, V: Value<K = K> + 'static> RangeTree<V> {
             .into_iter()
             .flatten()
     }
+    /// Get an iterator that return mutable reference of entries over specified range, including partial ranges.
     pub fn conflicts_mut(
         &mut self,
         range: impl RangeBounds<K>,
@@ -60,6 +64,9 @@ impl<K: Key + 'static, V: Value<K = K> + 'static> RangeTree<V> {
     pub fn contains(&self, key: K) -> bool {
         self.conflicts(key..=key).next().is_some()
     }
+    /// Insert entries with specified range. Will return error if occupied even partially.
+    /// After insertion success existing ranges is tried to be merged with [`Value::try_merge_forward`]
+    /// and [`Value::try_merge_backwards`] .
     pub fn insert(&mut self, mut start: K, mut len: K, mut value: V) -> Result<(), Occupied> {
         if self.conflicts(start..start + len).next().is_some() {
             return Err(Occupied);
@@ -95,6 +102,8 @@ impl<K: Key + 'static, V: Value<K = K> + 'static> RangeTree<V> {
 
         Ok(())
     }
+    /// Remove entries that are overlap with specified range.
+    /// Ranges that occupied partially will be split with [`Value::split`] and reinserted back.
     pub fn remove(&mut self, range: Range<K>) -> Vec<(Range<K>, V)> {
         let mut ret = Vec::new();
 
@@ -135,6 +144,7 @@ impl<K: Key + 'static, V: Value<K = K> + 'static> RangeTree<V> {
 
         ret
     }
+    /// Similar to [`Self::remove`] but also return ranges that is vacant
     pub fn remove_and_unused(&mut self, range: Range<K>) -> Vec<(Range<K>, Option<V>)> {
         let removed = self.remove(range.clone());
         let mut ret = Vec::new();
@@ -156,22 +166,27 @@ impl<K: Key + 'static, V: Value<K = K> + 'static> RangeTree<V> {
 
         ret
     }
+    /// Get the key of a last entry, or 0.
     pub fn end(&self) -> K {
         self.inner
             .last_key_value()
             .map_or(K::from(0), |(k, v)| *k + v.len)
     }
+    /// Get total entries
     pub fn len(&self) -> usize {
         self.inner.len()
     }
+    /// Check if entries are empty
     pub fn is_empty(&self) -> bool {
         self.len() == 0
     }
+    /// Get an iterator that return reference of entries.
     pub fn iter(&self) -> impl Iterator<Item = (Range<K>, &V)> + '_ {
         self.inner
             .iter()
             .map(|(k, Slot { len, value })| (*k..*k + *len, value))
     }
+    /// Get an iterator that return mutable reference of entries.
     pub fn iter_mut(&mut self) -> impl Iterator<Item = (Range<K>, &mut V)> + '_ {
         self.inner
             .iter_mut()
@@ -204,6 +219,7 @@ fn extract<K: Ord + Copy + std::fmt::Debug>(
 #[derive(Debug)]
 pub struct Occupied;
 
+/// Trait implementation for [`RangeTree`] range key, with built-in implementation for [`u64`] and [`usize`].
 pub trait Key:
     std::ops::Add<Output = Self>
     + std::ops::Sub<Output = Self>
@@ -217,12 +233,15 @@ pub trait Key:
 impl Key for u64 {}
 impl Key for usize {}
 
+/// Trait implementation for values that are stored as map over [`Key`].
 pub trait Value: Sized + std::fmt::Debug {
     type K: Key;
-
+    /// A function to check if possible to merge backward, with [`self`] as the inserted value.
     fn try_merge_backwards(self, other: &Self) -> Result<Self, Self>;
+    /// A function to check if possible to merge forward, with [`self`] as the inserted value.
     fn try_merge_forward(self, other: &Self) -> Result<Self, Self>;
 
+    /// A function to check if possible to split the entry, with [`self`] as the removed value.
     fn split(
         self,
         prev_range: Option<Range<Self::K>>,
